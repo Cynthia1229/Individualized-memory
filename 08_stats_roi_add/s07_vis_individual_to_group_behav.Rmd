@@ -1,0 +1,350 @@
+---
+title: "Visualizing the results of networks"
+author: "Jintao Sheng"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Preparing env and data
+
+```{r setup, include=FALSE}
+pacman::p_load(tidyverse, here, fs, glue, lmerTest, emmeans, ggsci, ggthemes, ggpubr, extrafont, patchwork)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, dpi = 300, dev = "CairoPNG")
+```
+
+```{r}
+bids_dir <- path(here())
+indiv_grp <- read_csv(
+  path(
+    bids_dir, "code", "08_stats_roi_add", "data", 
+    "corr_individual_to_grp_subjs415.csv"
+  ),
+  show_col_types = F
+)
+subj_behav <- read_csv(
+  path(bids_dir, "facename_behav.csv"), show_col_types = F
+  ) %>% 
+  filter(lag == "8_15")
+
+subj_beh_new <- read_csv(
+  path(bids_dir, "fMRI_facename_behav_recall_recog.csv"), show_col_types = FALSE
+) %>%
+  rename(subj_id = subID) %>% 
+  semi_join(subj_behav, by = "subj_id")
+```
+
+```{r}
+indiv_grp %>% 
+  filter(
+    roi_name == "bANG_schaefer2018" | roi_name =="bHIP" | roi_name == "bVVC" | roi_name == "PMC" | 
+      roi_name == "vmPFC" | roi_name == "bIFG"
+  ) %>% 
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>% 
+  pivot_longer(
+    -c(subj_id, roi_name), names_to = "grp_name", values_to = "grp_value"
+  ) %>% 
+  mutate(grp_value = psych::fisherz(grp_value)) %>% 
+  full_join(subj_beh_new, by = "subj_id") %>% 
+  group_nest(roi_name, grp_name) %>% 
+  mutate(
+    mdl = map(
+      data,
+      ~ cor.test(.x$grp_value, .x$FNRecall_acc_all, method = "pearson") %>% 
+        broom::tidy()
+    )
+  ) %>% 
+  unnest(mdl) %>% 
+  dplyr::select(-data) %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  dplyr::select(roi_name, grp_name, R.value = estimate, parameter, p.value, p.adj) %>%
+  arrange(grp_name) %>% 
+  knitr::kable(digits = 3)
+```
+
+```{r fig.width=12, fig.height=6}
+p1 <- 
+  indiv_grp %>% 
+  filter(
+    roi_name == "bANG_schaefer2018" | roi_name =="bHIP" | roi_name == "bVVC" | roi_name == "PMC" | 
+      roi_name == "vmPFC" | roi_name == "bIFG"
+  ) %>% 
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>%  
+  mutate(grp_value = psych::fisherz(corr_indiv_grsm)) %>% 
+  full_join(subj_beh_new, by = "subj_id") %>% 
+  group_nest(roi_name) %>% 
+  mutate(
+    mdl = map(
+      data,
+      ~ cor.test(.x$grp_value, .x$FNRecall_acc_all, method = "pearson") %>% 
+        broom::tidy()
+    )
+  ) %>% 
+  unnest(mdl) %>% 
+  dplyr::select(-data) %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  mutate(
+    sig.label = case_when(
+      p.adj <= 0.05 & p.adj > 0.01 ~ "*",
+      p.adj <= 0.01 & p.adj > 0.001 ~ "**",
+      p.adj <= 0.001 ~ "***",
+      T ~ ""
+    )
+  ) %>%
+  mutate(roi_name = gsub("b", "", as.character(roi_name))) %>%
+  mutate(roi_name = fct_reorder(roi_name, desc(estimate))) %>%
+  # mutate(roi_name = factor(roi_name, c("VVC", "PMC", "HIP", "ANG", "IFG", "vmPFC"))) %>% 
+  ggplot(aes(roi_name, estimate)) +
+  geom_col(aes(fill = p.value < 0.05), width = 0.6) +
+  geom_text(aes(label = sig.label), size = 8, fontface = "bold") +
+  coord_cartesian(ylim = c(0, 0.32)) +
+  scale_fill_manual(values = c("darkgray", "#E59E00")) +
+  labs(
+    x = "", y = "Pearson's r", fill = "p.value < 0.05"
+    ) +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    strip.background = element_rect(color = "white"),
+    strip.placement = "inside",
+    strip.text = element_text(size = 22),
+    legend.position = "none",
+    axis.line = element_line(size = 1)
+  )
+```
+
+```{r fig.width=12, fig.height=6}
+p2 <- 
+  indiv_grp %>% 
+  filter(
+    roi_name == "bANG_schaefer2018" | roi_name =="bHIP" | roi_name == "bVVC" | roi_name == "PMC" | 
+      roi_name == "vmPFC" | roi_name == "bIFG"
+  ) %>% 
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>%  
+  mutate(grp_value = psych::fisherz(corr_indiv_gtts)) %>% 
+  full_join(subj_beh_new, by = "subj_id") %>% 
+  group_nest(roi_name) %>% 
+  mutate(
+    mdl = map(
+      data,
+      ~ cor.test(.x$grp_value, .x$FNRecall_acc_all, method = "pearson") %>% 
+        broom::tidy()
+    )
+  ) %>% 
+  unnest(mdl) %>% 
+  dplyr::select(-data) %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  mutate(
+    sig.label = case_when(
+      p.adj <= 0.05 & p.adj > 0.01 ~ "*",
+      p.adj <= 0.01 & p.adj > 0.001 ~ "**",
+      p.adj <= 0.001 ~ "***",
+      T ~ ""
+    )
+  ) %>%
+  mutate(roi_name = gsub("b", "", as.character(roi_name))) %>%
+  mutate(roi_name = fct_reorder(roi_name, desc(estimate))) %>%
+  # mutate(roi_name = factor(roi_name, c("VVC", "PMC", "HIP", "ANG", "IFG", "vmPFC"))) %>% 
+  ggplot(aes(roi_name, estimate)) +
+  geom_col(aes(fill = p.value < 0.05), width = 0.6) +
+  geom_text(aes(label = sig.label), size = 8, fontface = "bold") +
+  coord_cartesian(ylim = c(0, 0.32)) +
+  scale_fill_manual(values = c("#E59E00", "darkgray")) +
+  labs(
+    x = "", y = "Pearson's r", fill = "p.value < 0.05"
+    ) +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    strip.background = element_rect(color = "white"),
+    strip.placement = "inside",
+    strip.text = element_text(size = 22),
+    legend.position = "none",
+    axis.line = element_line(size = 1)
+  )
+```
+
+```{r}
+indiv_grp %>% 
+  filter(
+    roi_name == "bANG_schaefer2018" | roi_name =="bHIP" | roi_name == "bVVC" | roi_name == "PMC" | 
+      roi_name == "vmPFC" | roi_name == "bIFG"
+  ) %>% 
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>%  
+  mutate(
+    corr_indiv_gtts = psych::fisherz(corr_indiv_gtts),
+    corr_indiv_grsm = psych::fisherz(corr_indiv_grsm)
+  ) %>% 
+  group_nest(roi_name) %>% 
+  mutate(
+    mdl = map(
+      data,
+      ~ cor.test(.x$corr_indiv_gtts, .x$corr_indiv_grsm, method = "pearson") %>% 
+        broom::tidy()
+    )
+  ) %>% 
+  unnest(mdl) %>% 
+  dplyr::select(-data) %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr"))
+```
+
+
+```{r fig.width=12, fig.height=6}
+p3 <- 
+  indiv_grp %>% 
+  filter(
+    roi_name == "bANG_schaefer2018" | roi_name =="bHIP" | roi_name == "bVVC" | roi_name == "PMC" | 
+      roi_name == "vmPFC" | roi_name == "bIFG"
+  ) %>% 
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>%  
+  mutate(
+    corr_indiv_gtts = psych::fisherz(corr_indiv_gtts),
+    corr_indiv_grsm = psych::fisherz(corr_indiv_grsm)
+  ) %>% 
+  group_nest(roi_name) %>% 
+  mutate(
+    mdl = map(
+      data,
+      ~ cor.test(.x$corr_indiv_gtts, .x$corr_indiv_grsm, method = "pearson") %>% 
+        broom::tidy()
+    )
+  ) %>% 
+  unnest(mdl) %>% 
+  dplyr::select(-data) %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  mutate(
+    sig.label = case_when(
+      p.adj <= 0.05 & p.adj > 0.01 ~ "*",
+      p.adj <= 0.01 & p.adj > 0.001 ~ "**",
+      p.adj <= 0.001 ~ "***",
+      T ~ ""
+    )
+  ) %>%
+  mutate(roi_name = gsub("b", "", as.character(roi_name))) %>%
+  mutate(roi_name = fct_reorder(roi_name, desc(estimate))) %>%
+  #mutate(roi_name = factor(roi_name, c("VVC", "PMC", "HIP", "ANG", "IFG", "vmPFC"))) %>% 
+  ggplot(aes(roi_name, estimate)) +
+  geom_col(aes(fill = p.value < 0.05), width = 0.6) +
+  geom_text(aes(label = sig.label), size = 8, fontface = "bold") +
+  #coord_cartesian(ylim = c(0, 0.32)) +
+  scale_fill_manual(values = c("#E59E00", "darkgray")) +
+  labs(
+    x = "", y = "Pearson's r", fill = "p.value < 0.05"
+    ) +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    strip.background = element_rect(color = "white"),
+    strip.placement = "inside",
+    strip.text = element_text(size = 22),
+    legend.position = "none",
+    axis.line = element_line(size = 1)
+  )
+```
+
+```{r}
+mdl_ability <- indiv_grp %>% 
+  mutate(
+    isps = psych::fisherz(corr_indiv_grsm),
+    ste = psych::fisherz(corr_indiv_gtts)
+  ) %>% 
+  full_join(subj_beh_new, by = "subj_id") %>% 
+  group_by(roi_name) %>% 
+  mutate(
+    FNRecall_acc_all = scale(FNRecall_acc_all),
+    isps = scale(isps),
+    ste = scale(ste)
+  ) %>% 
+  ungroup() %>% 
+  group_nest(roi_name) %>% 
+  mutate(mdl = map(data, ~ lm(FNRecall_acc_all ~ isps + ste, .x))) %>% 
+  mutate(res_tbl = map(mdl, ~ summary(.x) %>% broom::tidy())) %>% 
+  select(-c(data, mdl)) %>% 
+  unnest(res_tbl)
+```
+
+```{r fig.width=8, fig.height=4}
+p4 <- 
+  mdl_ability %>% 
+  filter(term != "(Intercept)") %>% 
+  # filter(
+  #   roi_name == "lANG" | roi_name == "rANG" | roi_name =="lHIP" | roi_name =="rHIP" | 
+  #     roi_name == "bVVC" | roi_name == "PMC" | roi_name == "vmPFC"
+  # ) %>% 
+  filter(
+    roi_name == "bANG_schaefer2018" | roi_name =="bHIP" | roi_name == "bVVC" | roi_name == "PMC" | 
+      roi_name == "vmPFC" | roi_name == "bIFG"
+  ) %>% 
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>%  
+  mutate(term = case_when(term == "isps" ~ "RSM", T ~ "TTS")) %>% 
+  mutate(
+    sig.label = case_when(
+      p.value <= 0.05 & p.value > 0.01 ~ "*",
+      p.value <= 0.01 & p.value > 0.001 ~ "**",
+      p.value <= 0.001 ~ "***",
+      T ~ ""
+    )
+  ) %>% 
+  # mutate(term = factor(term, c("TTS", "RSM"))) %>% 
+  mutate(roi_name = gsub("b", "", as.character(roi_name))) %>%
+  mutate(roi_name = fct_reorder(roi_name, desc(estimate))) %>%
+  #mutate(roi_name = factor(roi_name, c("VVC", "PMC", "HIP", "ANG", "IFG", "vmPFC"))) %>% 
+  ggplot(aes(roi_name, estimate, fill = term)) +
+  # geom_col() +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(
+    aes(label = sig.label), position = position_dodge(width = 0.8), 
+    size = 6, fontface = "bold"
+  ) +
+  coord_cartesian(ylim = c(0, 0.3)) +
+  scale_fill_manual(values = c("#C91E12", "#FDC58E")) +
+  scale_color_manual(values = c("#C91E12", "#FDC58E")) +
+  labs(y = "Beta", x = "", fill = "", color = "") +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    axis.line = element_line(size = 1),
+    legend.text = element_text(size = 22)
+  )
+```
+
+
+```{r fig.width=12, fig.height=7.4}
+# p1 s02_stats_compare_rr_ff; p2 s05_vis_rsm-avg_behav; p3 and p4 this file
+layout <- "
+AB
+CD
+"
+p1 + p2 + p3 + p4 + 
+  plot_layout(design = layout)
+#ggsave("vis_behav_num_rem_dice2.tiff", width = 12, height = 4)
+```
+
+## Correlation of individual-to-group similarity between RSM and memory content
+
+```{r}
+load(path(bids_dir, "code", "10_phd_thesis", "data", "corr_grp_mean_subj_memory_content.RData"))
+indiv_grp %>% 
+  filter(
+    roi_name == "bANG_schaefer2018" | roi_name =="bHIP" | roi_name == "bVVC" | roi_name == "PMC" | 
+      roi_name == "vmPFC" | roi_name == "bIFG"
+  ) %>% 
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>%  
+  pivot_longer(-c(subj_id, roi_name), names_to = "type", values_to = "correlation") %>% 
+  inner_join(corr_mean_grp_subj, by = "subj_id") %>% 
+  mutate(correlation = psych::fisherz(correlation), estimate = psych::fisherz(estimate)) %>% 
+  group_nest(roi_name, memory_type, type) %>% 
+  mutate(
+    mdl = map(
+      data,
+      ~ cor.test(.x$correlation, .x$estimate, method = "pearson") %>% 
+        broom::tidy()
+    )
+  ) %>% 
+  unnest(mdl) %>% 
+  dplyr::select(-data) %>% 
+  group_by(memory_type, type) %>%
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  ungroup() %>% 
+  dplyr::select(roi_name, type, memory_type, R.value = estimate, parameter, p.value, p.adj) %>%
+  arrange(type, memory_type) %>% 
+  knitr::kable(digits = 3)
+```
+

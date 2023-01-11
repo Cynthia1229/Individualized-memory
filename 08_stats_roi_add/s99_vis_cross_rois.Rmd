@@ -1,0 +1,64 @@
+---
+title: "Visualizing the results of networks"
+author: "Jintao Sheng"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Preparing env and data
+
+```{r setup, include=FALSE}
+pacman::p_load(tidyverse, here, fs, glue, emmeans, ggsci, ggthemes, ggpubr, extrafont, patchwork)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, dpi = 300, dev = "CairoPNG")
+```
+
+```{r}
+bids_dir <- path(here())
+dt_crs_rois <- read_csv(
+    file = path(
+      bids_dir, "code", "08_stats_roi_add", "results", 
+      str_glue("roipairs_correlation_within-subj.csv")
+    ),
+    show_col_types = F
+  ) 
+```
+
+```{r}
+dt_crs_rois %>% 
+  filter(
+    roi_name1 == "bANG" | roi_name1 =="bHIP" | roi_name1 == "bVVC" | 
+      roi_name1 == "PMC" | roi_name1 == "vmPFC" | roi_name1 == "bIFG"
+    ) %>% 
+  filter(
+    roi_name2 == "bANG" | roi_name2 =="bHIP" | roi_name2 == "bVVC" | 
+      roi_name2 == "PMC" | roi_name2 == "vmPFC" | roi_name2 == "bIFG"
+    ) %>% 
+  group_by(roi_name1, roi_name2) %>% 
+  mutate(similarity = psych::fisherz(corr_rois)) %>% 
+  mutate(across(.cols = similarity, ~ ifelse(is.infinite(.x), NA, .x))) %>% 
+  summarise(similarity = sd(similarity), .groups = "drop") %>% 
+  mutate(
+    roi_name1 = gsub("b", "", as.character(roi_name1)),
+    roi_name2 = gsub("b", "", as.character(roi_name2))
+  ) %>%
+  mutate(
+    roi_name1 = factor(roi_name1, c("VVC", "PMC", "HIP", "ANG", "IFG", "vmPFC")),
+    roi_name2 = factor(roi_name2, c("VVC", "PMC", "HIP", "ANG", "IFG", "vmPFC"))
+  ) %>%
+  ggplot(aes(x = roi_name1, y = roi_name2, fill = similarity)) +
+  geom_tile() +
+  geom_text(aes(label = round(similarity, digits = 3)), size = 4) +
+  scale_fill_gradient2(low = "#6D9EC1", high = "#E46726") +
+  #facet_wrap(~roi_name) +
+  coord_fixed() +
+  labs(x = "", y = "") +
+  theme_pubr(base_size = 16, base_family = "Gill Sans MT") +
+  theme(
+    strip.background = element_rect(color = "white"),
+    strip.text = element_text(size = 16),
+    legend.position = "none",
+    axis.line = element_blank()
+  )
+```

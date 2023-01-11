@@ -1,0 +1,463 @@
+---
+title: "Visualizing the results of networks"
+author: "Jintao Sheng"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Preparing env and data
+
+```{r setup, include=FALSE}
+pacman::p_load(tidyverse, here, fs, glue, emmeans, ggsci, ggthemes, ggpubr, extrafont, patchwork)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, dpi = 300, dev = "CairoPNG")
+```
+
+## Loading data
+
+```{r}
+bids_dir <- path(here())
+
+subj_stats <- read_csv(
+  path(bids_dir, "facename_behav.csv"), show_col_types = FALSE
+) %>% 
+  filter(lag == "8_15")
+
+isr_isc <- read_csv(
+  path(
+    bids_dir, "code", "08_stats_roi_add", "data", 
+    str_glue("isr_gisps_isc_subjs415.csv")
+  ),
+  show_col_types = F
+)
+
+load(
+  file = path(
+    bids_dir, "code", "01_behav_analyses", "dat_mht_distance_subj415.RData"
+  )
+)
+
+demean_id <- "nodemean"
+load(
+  file = path(
+    bids_dir, "code", "08_stats_roi_add", "results", 
+    str_glue("res_mantel_isr_trials60_mht_subjs415_{demean_id}.RData")
+  )
+) # res_mantel_mht_isr
+tmp <- res_mantel_mht_isr %>% 
+  filter(
+    roi_name =="bHIP" | roi_name == "bVVC" | roi_name == "PMC" | 
+      roi_name == "vmPFC" | roi_name == "bIFG"
+  )
+load(
+  file = path(
+    bids_dir, "code", "08_stats_roi_add", "results", 
+    str_glue("res_mantel_isr_trials60_mht_subjs415_{demean_id}_ang-schaefer2018.RData")
+  )
+)
+res_mantel_mht_isr <- res_mantel_mht_isr %>% 
+  filter(roi_name =="bANG_schaefer2018") %>% 
+  bind_rows(tmp)
+```
+
+```{r}
+res_mantel_mht_isr %>% 
+  filter(isr_name == "isc", memory_type == "association_memory") %>% 
+  mutate(
+    p.adj = p.adjust(p.value, method = "fdr"),
+    sig.label = case_when(
+    p.adj <= 0.05 & p.adj > 0.01 ~ "*",
+    p.adj <= 0.01 & p.adj > 0.001 ~ "**",
+    p.adj <= 0.001 ~ "***",
+    T ~ ""
+    ),
+    map_df(
+      mdl, 
+      ~ as_tibble_row(
+        quantile(.x$perm, c(0.05, 0.95)), 
+        .name_repair = ~ c("ymin", "ymax"))
+      )
+    ) %>% 
+  dplyr::select(roi_name, statistic_r, p.value, p.adj, ymax, sig.label)
+```
+
+```{r fine-grained-memory}
+res_mantel_mht_isr %>% 
+  filter(memory_type == "precise_memory") %>% 
+  group_by(isr_name) %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  ungroup() %>% 
+  dplyr::select(roi_name, isr_name, statistic_r, p.value, p.adj) %>% 
+  arrange(isr_name)
+```
+
+
+```{r fine-grained-memory, fig.width=9, fig.height=4}
+res_mantel_mht_isr %>% 
+  filter(memory_type == "precise_memory") %>% 
+  group_by(isr_name) %>% 
+  mutate(
+    p.adj = p.adjust(p.value, method = "fdr"),
+    sig.label = case_when(
+    p.adj <= 0.05 & p.adj > 0.01 ~ "*",
+    p.adj <= 0.01 & p.adj > 0.001 ~ "**",
+    p.adj <= 0.001 ~ "***",
+    T ~ ""
+    ),
+    map_df(
+      mdl, 
+      ~ as_tibble_row(
+        quantile(.x$perm, c(0.05, 0.95)), 
+        .name_repair = ~ c("ymin", "ymax"))
+      )
+    ) %>% 
+  ungroup() %>% 
+  dplyr::select(roi_name, isr_name, statistic_r, p.value, p.adj, ymax, sig.label) %>% 
+  mutate(isr_name = case_when(isr_name == "gisps" ~ "gISPS", T ~ "ISC")) %>% 
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>% 
+  mutate(roi_name = gsub("b", "", as.character(roi_name))) %>%
+  mutate(roi_name = fct_reorder(roi_name, desc(statistic_r))) %>%
+  ggplot(aes(roi_name, statistic_r)) +
+  geom_col(aes(fill = p.value < 0.05), width = 0.6) +
+  geom_point(aes(roi_name, ymax), size = 3) +
+  geom_text(aes(label = sig.label), size = 8, fontface = "bold") +
+  facet_wrap(~isr_name, nrow = 1) +
+  coord_cartesian(ylim = c(0, 0.08)) +
+  scale_fill_manual(values = c("darkgray", "#E59E00")) +
+  labs(
+    x = "", y = "Pearson's r", fill = "p.fdr < 0.05"
+    ) +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    strip.background = element_rect(color = "white"),
+    strip.placement = "inside",
+    strip.text = element_text(size = 26),
+    legend.position = "none",
+    axis.line = element_line(size = 1)
+  )
+```
+
+```{r}
+p1 <-
+  res_mantel_mht_isr %>% 
+  filter(isr_name == "gisps", memory_type == "association_memory") %>% 
+  mutate(
+    p.adj = p.adjust(p.value, method = "fdr"),
+    sig.label = case_when(
+    p.adj <= 0.05 & p.adj > 0.01 ~ "*",
+    p.adj <= 0.01 & p.adj > 0.001 ~ "**",
+    p.adj <= 0.001 ~ "***",
+    T ~ ""
+    ),
+    map_df(
+      mdl, 
+      ~ as_tibble_row(
+        quantile(.x$perm, c(0.05, 0.95)), 
+        .name_repair = ~ c("ymin", "ymax"))
+      )
+    ) %>% 
+  dplyr::select(roi_name, statistic_r, p.value, p.adj, ymax, sig.label) %>% 
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>% 
+  mutate(roi_name = gsub("b", "", as.character(roi_name))) %>%
+  mutate(roi_name = fct_reorder(roi_name, desc(statistic_r))) %>%
+  ggplot(aes(roi_name, statistic_r)) +
+  geom_col(aes(fill = p.value < 0.05), width = 0.6) +
+  geom_point(aes(roi_name, ymax), size = 3) +
+  geom_text(aes(label = sig.label), size = 8, fontface = "bold") +
+  coord_cartesian(ylim = c(0, 0.04)) +
+  scale_fill_manual(values = c("darkgray", "#E59E00")) +
+  labs(
+    x = "", y = "Pearson's r", fill = "p.fdr < 0.05"
+    ) +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    strip.background = element_rect(color = "white"),
+    strip.placement = "inside",
+    strip.text = element_text(size = 26),
+    legend.position = "none",
+    axis.line = element_line(size = 1)
+  )
+```
+
+```{r}
+p2 <-
+  res_mantel_mht_isr %>% 
+  filter(isr_name == "isc", memory_type == "association_memory") %>% 
+  mutate(
+    p.adj = p.adjust(p.value, method = "fdr"),
+    sig.label = case_when(
+    p.adj <= 0.05 & p.adj > 0.01 ~ "*",
+    p.adj <= 0.01 & p.adj > 0.001 ~ "**",
+    p.adj <= 0.001 ~ "***",
+    T ~ ""
+    ),
+    map_df(
+      mdl, 
+      ~ as_tibble_row(
+        quantile(.x$perm, c(0.05, 0.95)), 
+        .name_repair = ~ c("ymin", "ymax"))
+      )
+    ) %>% 
+  dplyr::select(roi_name, statistic_r, p.value, p.adj, ymax, sig.label) %>% 
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>% 
+  mutate(roi_name = gsub("b", "", as.character(roi_name))) %>%
+  mutate(roi_name = fct_reorder(roi_name, desc(statistic_r))) %>%
+  ggplot(aes(roi_name, statistic_r)) +
+  geom_col(aes(fill = p.value < 0.05), width = 0.6) +
+  geom_point(aes(roi_name, ymax), size = 3) +
+  geom_text(aes(label = sig.label), size = 8, fontface = "bold") +
+  coord_cartesian(ylim = c(0, 0.04)) +
+  scale_fill_manual(values = c("darkgray", "#E59E00")) +
+  labs(
+    x = "", y = "Pearson's r", fill = "p.fdr < 0.05"
+    ) +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    strip.background = element_rect(color = "white"),
+    strip.placement = "inside",
+    strip.text = element_text(size = 26),
+    legend.position = "none",
+    axis.line = element_line(size = 1)
+  )
+```
+
+```{r}
+isr_isc %>% 
+  filter(roi_name == "bANG_schaefer2018") %>% 
+  psych::describe() %>% 
+  knitr::kable(digits = 3)
+```
+
+```{r}
+load(
+  path(
+    bids_dir, "code", "08_stats_roi_add", "results", 
+    str_glue("res_mantel_gisps_isc_trials60_subjs415_{demean_id}_bi-rois.RData")
+  )
+)
+
+res_mantel_gisps_isc %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  dplyr::select(roi_name, statistic_r, p.value, p.adj)
+```
+
+
+```{r vis-bar-mantel-res, fig.width=12, fig.height=6}
+load(
+  path(
+    bids_dir, "code", "08_stats_roi_add", "results", 
+    str_glue("res_mantel_gisps_isc_trials60_subjs415_{demean_id}_bi-rois.RData")
+  )
+)
+p3 <- 
+  res_mantel_gisps_isc %>% 
+  mutate(
+    p.adj = p.adjust(p.value, method = "fdr"),
+    sig.label = case_when(
+    p.adj <= 0.05 & p.adj > 0.01 ~ "*",
+    p.adj <= 0.01 & p.adj > 0.001 ~ "**",
+    p.adj <= 0.001 ~ "***",
+    T ~ ""
+    ),
+    map_df(
+      mdl, 
+      ~ as_tibble_row(
+        quantile(.x$perm, c(0.05, 0.95)), 
+        .name_repair = ~ c("ymin", "ymax"))
+      )
+    ) %>% 
+  dplyr::select(roi_name, statistic_r, p.value, p.adj, ymax, sig.label) %>% 
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>% 
+  mutate(roi_name = gsub("b", "", as.character(roi_name))) %>%
+  mutate(roi_name = fct_reorder(roi_name, desc(statistic_r))) %>%
+  ggplot(aes(roi_name, statistic_r)) +
+  geom_col(aes(fill = p.value < 0.05), width = 0.6) +
+  geom_point(aes(roi_name, ymax), size = 3) +
+  geom_text(aes(label = sig.label), size = 8, fontface = "bold") +
+  coord_cartesian(ylim = c(0, 0.40)) +
+  scale_fill_manual(values = c("#E59E00", "darkgray")) +
+  labs(
+    x = "", y = "Pearson's r", fill = "p.fdr < 0.05"
+    ) +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    strip.background = element_rect(color = "white"),
+    strip.placement = "inside",
+    strip.text = element_text(size = 26),
+    legend.position = "none",
+    axis.line = element_line(size = 1)
+  )
+```
+
+
+```{r}
+mdl_content <- isr_isc %>% 
+  mutate(
+    gisps_dist = 1 - gisps, isc_dist = 1 - isc
+  ) %>% 
+  inner_join(
+    mht_dist, by = c("subj_id1", "subj_id2")
+  ) %>% 
+  group_by(roi_name, memory_type) %>% 
+  mutate(
+    distance = scale(distance),
+    gisps_dist = scale(gisps_dist),
+    isc_dist = scale(isc_dist)
+  ) %>% 
+  ungroup() %>% 
+  group_nest(roi_name, memory_type) %>% 
+  mutate(mdl = map(data, ~ lm(distance ~ gisps_dist + isc_dist, .x))) %>% 
+  mutate(res_tbl = map(mdl, ~ summary(.x) %>% broom::tidy())) %>% 
+  select(-c(data, mdl)) %>% 
+  unnest(res_tbl)
+```
+
+
+```{r fig.width=8, fig.height=4}
+p4 <- 
+  mdl_content %>% 
+  filter(term != "(Intercept)", memory_type == "association_memory") %>%
+  # filter(
+  #   roi_name == "lANG" | roi_name == "rANG" | roi_name =="lHIP" | roi_name =="rHIP" | 
+  #     roi_name == "bVVC" | roi_name == "PMC" | roi_name == "vmPFC"
+  # ) %>%  
+  filter(
+    roi_name == "bANG_schaefer2018" | roi_name =="bHIP" | roi_name == "bVVC" | roi_name == "PMC" | 
+      roi_name == "vmPFC" | roi_name == "bIFG"
+  ) %>% 
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>%  
+  mutate(term = case_when(term == "gisps_dist" ~ "gISPS", T ~ "ISC")) %>% 
+  mutate(
+    sig.label = case_when(
+      p.value <= 0.05 & p.value > 0.01 ~ "*",
+      p.value <= 0.01 & p.value > 0.001 ~ "**",
+      p.value <= 0.001 ~ "***",
+      T ~ ""
+    )
+  ) %>% 
+  mutate(term = factor(term, c("gISPS", "ISC"))) %>% 
+  mutate(roi_name = gsub("b", "", as.character(roi_name))) %>%
+  mutate(roi_name = fct_reorder(roi_name, desc(estimate))) %>%
+  # mutate(roi_name = factor(roi_name, c("VVC", "PMC", "HIP", "ANG", "IFG", "vmPFC"))) %>% 
+  ggplot(aes(roi_name, estimate, fill = term)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  coord_cartesian(ylim = c(0, 0.04)) +
+  scale_fill_manual(values = c("#C91E12", "#FDC58E")) +
+  geom_text(
+    aes(label = sig.label), position = position_dodge(width = 0.8), 
+    size = 6, fontface = "bold"
+  ) +
+  labs(y = "Beta", x = "", fill = "") +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    axis.line = element_line(size = 1),
+    legend.text = element_text(size = 22),
+    strip.background = element_rect(color = "white")
+  )
+```
+
+
+```{r fig.width=12, fig.height=7.4}
+# p1 s02_stats_compare_rr_ff; p2 s05_vis_rsm-avg_behav; p3 and p4 this file
+layout <- "
+AB
+CD
+"
+p1 + p2 + p3 + p4 + 
+  plot_layout(design = layout)
+#ggsave("vis_behav_num_rem_dice2.tiff", width = 12, height = 4)
+```
+
+## Correlation between gISPS and SMC based on 30 items
+
+```{r}
+load(
+  file = path(
+    bids_dir, "code", "08_stats_roi_add", "results", 
+    str_glue("res_mantel_isr_30items_mht_subjs415_{demean_id}_bi_rois.RData")
+  )
+)
+
+res_mantel_mht_isr %>% 
+  filter(memory_type == "association_memory") %>% 
+  mutate(
+    p.adj = p.adjust(p.value, method = "fdr"),
+    sig.label = case_when(
+    p.adj <= 0.05 & p.adj > 0.01 ~ "*",
+    p.adj <= 0.01 & p.adj > 0.001 ~ "**",
+    p.adj <= 0.001 ~ "***",
+    T ~ ""
+    ),
+    map_df(
+      mdl, 
+      ~ as_tibble_row(
+        quantile(.x$perm, c(0.05, 0.95)), 
+        .name_repair = ~ c("ymin", "ymax"))
+      )
+    ) %>% 
+  dplyr::select(roi_name, statistic_r, p.value, p.adj, ymax, sig.label)
+```
+
+## Partial correlation
+
+```{r}
+demean_id <- "nodemean"
+load(
+  file = path(
+    bids_dir, "code", "08_stats_roi_add", "results", 
+    str_glue("res_parmantel_isr_trials60_mht_subjs415_{demean_id}_bi_rois.RData")
+  )
+) # res_parmantel_mht_isr_association, res_parmantel_mht_isr_precise
+```
+
+```{r}
+res_parmantel_mht_isr_association %>% 
+  filter(isr_name == "isc") %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  dplyr::select(roi_name, statistic_r, p.value, p.adj) %>% 
+  knitr::kable(digits = 3)
+```
+
+```{r}
+load(
+  file = path(
+    bids_dir, "code", "08_stats_roi_add", "results", 
+    str_glue("res_mantel_isr_trials60_mht_subjs415_{demean_id}_allrois.RData")
+  )
+) 
+```
+
+```{r}
+res_mantel_mht_isr %>% 
+  filter(isr_name == "gisps", memory_type == "association_memory") %>% 
+  filter(
+    roi_name == "bANG_schaefer2018" | roi_name =="bHIP" | roi_name == "bVVC" | roi_name == "PMC" | 
+      roi_name == "vmPFC" | roi_name == "bIFG"
+  ) %>% 
+  mutate(p.adj = p.adjust(p.value, method = "fdr")) %>% 
+  dplyr::select(roi_name, statistic_r, p.value, p.adj) %>% 
+  knitr::kable(digits = 3)
+```
+
+## Scatter plot
+
+```{r}
+isr_isc <- read_csv(
+  path(bids_dir, "code", "08_stats_roi_add", "data", "isr_gisps_isc_subjs415.csv"),
+  show_col_types = F
+)
+load(
+  path(bids_dir, "code", "01_behav_analyses", "dat_mht_distance_subj415.RData")
+)
+
+isr_isc %>% filter(roi_name == "bANG_schaefer2018") %>% 
+  pivot_longer(c(gisps, isc), names_to = "type", values_to = "correlation") %>% 
+  mutate(dist_corr = 1 - correlation) %>% 
+  inner_join(mht_dist, by = c("subj_id1", "subj_id2")) %>% 
+  ggplot(aes(dist_corr, distance)) +
+  geom_point() +
+  facet_grid(memory_type~type)
+```
+
+

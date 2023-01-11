@@ -1,0 +1,155 @@
+---
+title: "Visualizing the results of networks"
+author: "Jintao Sheng"
+date: "`r Sys.time()`"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Preparing env and data
+
+```{r setup, include=FALSE}
+pacman::p_load(tidyverse, here, fs, glue, lmerTest, emmeans, ggsci, ggthemes, ggpubr, extrafont, patchwork)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, dpi = 300, dev = "CairoPNG")
+```
+
+## loading RSM
+
+```{r}
+bids_dir <- path(here())
+hs_corr_207subjs <- read_csv(
+  path(
+    bids_dir, "code", "08_stats_roi_add", "results", "split_half_rsm_tts_corr_207subjs.csv"
+  ),
+  show_col_types = F
+)
+
+hs_corr_fewsubjs <- read_csv(
+  path(
+    bids_dir, "code", "08_stats_roi_add", "results", "split_half_rsm_tts_corr_fewer_subjs.csv"
+  ),
+  show_col_types = F
+)
+```
+
+```{r}
+hs_corr_207subjs %>% 
+  group_by(type) %>% 
+  mutate(iperm = seq(1000)) %>% 
+  ungroup() %>% 
+  pivot_longer(-c(type, iperm), names_to = "roi_name", values_to = "pearson_r") %>% 
+  group_by(roi_name, type) %>% 
+  summarise(mean_sd(pearson_r), .groups = "drop") %>% 
+  select(-c(ymin, ymax)) %>% 
+  pivot_wider(names_from = "type", values_from = "y")
+```
+
+```{r}
+hs_corr_fewsubjs
+```
+
+
+```{r}
+p1 <- 
+  hs_corr_207subjs %>% 
+  filter(type == "RSM") %>% 
+  mutate(iperm = seq(1000)) %>% 
+  pivot_longer(-c(type, iperm), names_to = "roi_name", values_to = "pearson_r") %>% 
+  group_by(roi_name, type) %>% 
+  summarise(mean_sd(pearson_r), .groups = "drop") %>%
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>%   
+  # mutate(roi_name = fct_reorder(roi_name, desc(grp_mean))) %>% 
+  mutate(roi_name = gsub("b", "", as.character(roi_name))) %>%
+  mutate(roi_name = factor(roi_name, c("VVC", "PMC", "HIP", "ANG", "IFG", "vmPFC"))) %>% 
+  ggplot(aes(roi_name, y, ymax = ymax, ymin = ymin)) +
+  geom_col() +
+  geom_errorbar(width = 0.3, size = 1) +
+  coord_cartesian(ylim = c(0, 1)) +
+  scale_y_continuous(breaks = seq(0,1,0.2)) +
+  facet_wrap(~type) +
+  scale_fill_manual(values = c("darkgray", "#E59E00")) +
+  labs(x = "", y = "Split-half correlation") +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    strip.background = element_rect(color = "white"),
+    strip.placement = "inside",
+    strip.text = element_text(size = 24),
+    legend.position = "none",
+    axis.line = element_line(size = 1)
+  )
+```
+
+```{r}
+p2 <- 
+  hs_corr_fewsubjs %>% 
+  mutate(roi = "ANG") %>% 
+  ggplot(aes(subjs_num, mean_corr_half_rsm)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  coord_cartesian(ylim = c(0.3, 1)) +
+  # geom_hline(yintercept = 0.843, size = 1, linetype="dashed") +
+  facet_wrap(~roi) +
+  labs(x = "#Subjects", y = "Split-half correlation") +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    strip.background = element_rect(color = "white"),
+    strip.text = element_text(size = 24),
+    axis.line = element_line(size = 1)
+  )
+```
+
+```{r}
+p3 <- 
+  hs_corr_207subjs %>% 
+  filter(type == "TTS") %>% 
+  mutate(iperm = seq(1000)) %>% 
+  pivot_longer(-c(type, iperm), names_to = "roi_name", values_to = "pearson_r") %>% 
+  group_by(roi_name, type) %>% 
+  summarise(mean_sd(pearson_r), .groups = "drop") %>%
+  mutate(roi_name = if_else(roi_name == "bANG_schaefer2018", "bANG", roi_name)) %>%   
+  # mutate(roi_name = fct_reorder(roi_name, desc(grp_mean))) %>% 
+  mutate(roi_name = gsub("b", "", as.character(roi_name))) %>%
+  mutate(roi_name = factor(roi_name, c("VVC", "PMC", "HIP", "ANG", "IFG", "vmPFC"))) %>% 
+  ggplot(aes(roi_name, y, ymax = ymax, ymin = ymin)) +
+  geom_col() +
+  geom_errorbar(width = 0.3, size = 1) +
+  coord_cartesian(ylim = c(0, 1)) +
+  scale_y_continuous(breaks = seq(0,1,0.2)) +
+  facet_wrap(~type) +
+  scale_fill_manual(values = c("darkgray", "#E59E00")) +
+  labs(x = "", y = "Split-half correlation") +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    strip.background = element_rect(color = "white"),
+    strip.placement = "inside",
+    strip.text = element_text(size = 24),
+    legend.position = "none",
+    axis.line = element_line(size = 1)
+  )
+```
+
+```{r}
+p4 <- 
+  hs_corr_fewsubjs %>% 
+  mutate(roi = "ANG") %>% 
+  ggplot(aes(subjs_num, mean_corr_half_tts)) +
+  geom_line(size = 1) +
+  geom_point(size = 3) +
+  coord_cartesian(ylim = c(0.3, 1)) +
+  # geom_hline(yintercept = 0.843, size = 1, linetype="dashed") +
+  facet_wrap(~roi) +
+  labs(x = "#Subjects", y = "Split-half correlation") +
+  theme_pubr(base_size = 20, base_family = "Gill Sans MT") +
+  theme(
+    strip.background = element_rect(color = "white"),
+    strip.text = element_text(size = 24),
+    axis.line = element_line(size = 1)
+  )
+```
+
+```{r fig.width=10, fig.height=8}
+p1 + p2 + p3 + p4 + 
+  plot_layout(widths = c(1.6, 1))
+```
+
