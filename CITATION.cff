@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this dataset, please cite it as below."
+authors:
+- family-names: "Jintao"
+  given-names: "Sheng"
+  orcid: "https://orcid.org/0000-0002-8626-5741"
+title: "Individualized memory"
+version: 1.0.0
+doi: 10.5281/zenodo.8231187
+date-released: 2023-08-09
+url: "https://github.com/Cynthia1229/Individualized-memory.git"
